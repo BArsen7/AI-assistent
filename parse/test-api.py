@@ -10,7 +10,7 @@ response = requests.get('https://api.vk.com/method/wall.get',
 params={'access_token': TOKEN_USER,
         'v': VERSION,
         'domain': DOMAIN,
-        'count': 1,
+        'count': 1, # max = 100
         'filter': str('owner')})
 
 
