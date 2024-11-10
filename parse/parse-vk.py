@@ -4,9 +4,9 @@ import time
 import pandas as pd
 
 # переменные 
-TOKEN_USER =  #токен пользователя
+TOKEN_USER = "" #токен пользователя
 VERSION = 5.131 # используемая версия апи
-DOMAIN =  'mephi_official' #имя сообщества из адресной строки
+DOMAIN = 'snomephi' #'vmephi'  #'reactorclub' #'mephi_official' #'osomephi' #имя сообщества из адресной строки  mephi_official
 
 
 
