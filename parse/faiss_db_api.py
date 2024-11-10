@@ -29,14 +29,22 @@ hf_embedding = HuggingFaceEmbeddings(
 )
 
 
-# Загрузка базы данных FAISS
-db_path = "faiss_db"
+# Загрузка баз данных FAISS
+db_path_vk = "../faiss_db_vk"
+db_path_policy = "../faiss_db_policy"
 try:
-    db = FAISS.load_local(db_path, hf_embedding, allow_dangerous_deserialization=True)
+    db_vk = FAISS.load_local(db_path_vk, hf_embedding, allow_dangerous_deserialization=True)
 except Exception:
     empty_document = Document(page_content=" ")
-    db = FAISS.from_documents([empty_document], hf_embedding)
-    db.save_local(db_path) # Сохранение пустой вбд, если ее еще нет
+    db_vk = FAISS.from_documents([empty_document], hf_embedding)
+    db_vk.save_local(db_path_vk) # Сохранение пустой вбд, если ее еще нет
+    
+try:
+    db_policy = FAISS.load_local(db_path_policy, hf_embedding, allow_dangerous_deserialization=True)
+except Exception:
+    empty_document = Document(page_content=" ")
+    db_policy = FAISS.from_documents([empty_document], hf_embedding)
+    db_policy.save_local(db_path_policy) # Сохранение пустой вбд, если ее еще нет
 
 # Конфигурация для разбиения текста на части
 text_splitter = CharacterTextSplitter(separator="\n", chunk_size=1000, chunk_overlap=128)
@@ -45,9 +53,18 @@ text_splitter = CharacterTextSplitter(separator="\n", chunk_size=1000, chunk_ove
 # Маршрут для поиска по запросу
 @app.post("/search/")
 async def search(query: Query):
-    results = db.similarity_search(query.text, query.number_doc_to_return)
-    context_str = "\n\n".join([n.page_content for n in results])
-    return [{"content": context_str}]
+    results_vk = db_vk.similarity_search(query.text, query.number_doc_to_return)
+    results_policy = db_policy.similarity_search(query.text, query.number_doc_to_return)
+    
+    db_temp = FAISS.from_documents(results_vk + results_policy, hf_embedding)
+    results_db_temp = db_temp.similarity_search(query.text, query.number_doc_to_return)
+    del (db_temp)
+    
+    context_str = "\n\n".join([n.page_content for n in results_db_temp])
+    if context_str[0] == " ":
+        raise HTTPException(status_code=404, detail="Vector database empty")
+    else:
+        return [{"content": context_str}]
 
 
 # Маршрут для добавления нового документа
@@ -88,14 +105,14 @@ async def add_document(file: UploadFile = File(...)):
     similarity_threshold = 0.2
     doc_add_to_db_flag = False
     for chunk in data:
-        search_results = db.similarity_search_with_score(chunk.page_content, 1)
+        search_results = db_policy.similarity_search_with_score(chunk.page_content, 1)
         if search_results[0][1] > similarity_threshold:
             # Если такой информации в вбд нет, добавляем в нее чанк
-            db.add_documents(data)
+            db_policy.add_documents(data)
             doc_add_to_db_flag = True
 
     if not doc_add_to_db_flag:
-        return HTTPException(status_code=409, detail="Document already exists in the database")
+        return HTTPException(status_code=409, detail="Document already exists in the db_policy")
     else:
-        db.save_local(db_path)  # Сохраняем изменения в вбд
-        return HTTPException(status_code=200, detail="Document added successfully") 
+        db_policy.save_local(db_path_policy)  # Сохраняем изменения в вбд
+        return HTTPException(status_code=200, detail="Document added to db_policy successfully") 

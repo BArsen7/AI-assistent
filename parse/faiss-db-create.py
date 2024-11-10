@@ -1,6 +1,9 @@
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.document_loaders import Docx2txtLoader
+from langchain.text_splitter import CharacterTextSplitter
 import pandas as pd
+import re
 
 print('инициализация')
 # Инициализация HuggingFaceEmbeddings
@@ -13,12 +16,11 @@ hf_embedding = HuggingFaceEmbeddings(
     encode_kwargs=encode_kwargs
 )
 
+#==============================ВК==============================#
 # импорт предобработанных данных 
 print("начинаю импорт данных")
 all_docs = pd.read_csv('clean_data.csv')['c-text'].tolist()
 print("завершён импорт данных")
-
-
  
 """ импорт вбд
 db = FAISS.load_local(
@@ -32,9 +34,27 @@ db = FAISS.load_local(
 db = FAISS.from_texts(all_docs, hf_embedding)
 print('...')
 db.as_retriever()
-print("Векторная база данных создана")
+print("Векторная база данных faiss_db_vk создана")
 # Сохранение индексаированных данных локально
-db.save_local("faiss_db")
-print("Векторная база данных сохранена")
+db.save_local("faiss_db_vk")
+print("Векторная база данных faiss_db_vk сохранена")
 
+#===========================Методичка===========================#
 
+loader = Docx2txtLoader("MEPHI.docx")  # Открываем файл
+# Разбиваем файл на чанки
+text_splitter = CharacterTextSplitter(separator="\n", chunk_size=1000, chunk_overlap=128)
+data = loader.load_and_split(text_splitter)
+# Очищаем полученные чанки
+for chunk in data:
+    chunk.page_content = re.sub("\\n", " ", chunk.page_content)
+    chunk.page_content = re.sub(" +", " ", chunk.page_content)
+    chunk.page_content = re.sub("\t", " ", chunk.page_content)
+    
+db = FAISS.from_documents(data, hf_embedding)
+print('...')
+db.as_retriever()
+print("Векторная база данных faiss_db_policy создана")
+# Сохранение индексаированных данных локально
+db.save_local("faiss_db_policy")
+print("Векторная база данных faiss_db_policy сохранена")

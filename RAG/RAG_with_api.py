@@ -14,13 +14,13 @@ class RAG:
 
         self.yandex_gpt = YandexGPT(
             iam_token=iam_token,
-            folder_id="b1ge********",
+            folder_id="b1ge2ut**********",
             model_name=llm_name,
             temperature=0.2
         )
 
         self.template = """Ты умный чат-бот. Ты любишь отвечать на вопросы пользователей, касающиеся студенческих активностей в НИЯУ МИФИ.\n
-                Ниже представлена основная информация про НИЯУ МИФИ:\n
+                Ниже представлена основная информация про студенческие активности в НИЯУ МИФИ:\n
                 {context_str}\n
                 На основе вышеуказанной информации, ответь на вопрос пользователя. В ответе укажи только содержательную часть без повторения вопроса.\n
                 Вопрос: {query}\n
@@ -33,7 +33,6 @@ class RAG:
         # Выполнение POST-запроса к API для поиска
         search_url = f"{self.api_url}/search/"
         response = requests.post(search_url, json={"text": query, "number_doc_to_return": k})
-
         # Проверка ответа от API
         if response.status_code == 200:
             search_results = response.json()
@@ -70,6 +69,7 @@ class RAG:
             "context_str": context_str,
             "query": query
         }
+        
 
         # Встраивание вопроса и контекста в промпт для LLM
         llm_sequence = prompt | self.yandex_gpt
