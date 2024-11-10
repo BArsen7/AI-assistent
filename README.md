@@ -14,6 +14,8 @@ AI assistent for MEPHI students
 3.2  create_iam_token.py - скрипт для автоматического получения iam_token'a
 3.3  keys.json - файл с авторизованными ключами, которые необходимы для получения iam_token'a
 
+Ссылка на векторные базы данных : https://disk.yandex.ru/d/2-F--Aw44QbGjg
+
 ## Получение токена пользователя
 1. Создать приложение по ссылке https://vk.com/editapp?act=create
    Выбрать Платформу Standalone-приложение и нажать на кнопку "Перейти в сервис"  
