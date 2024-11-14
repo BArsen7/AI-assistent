@@ -1,7 +1,7 @@
 import requests
 from langchain_community.llms import YandexGPT
 from langchain_core.prompts import PromptTemplate
-from create_iam_token import get_iam_token
+from .create_iam_token import get_iam_token
 
 
 class RAG:
@@ -14,7 +14,7 @@ class RAG:
 
         self.yandex_gpt = YandexGPT(
             iam_token=iam_token,
-            folder_id="b1ge2ut**********",
+            folder_id="b1ge2********",
             model_name=llm_name,
             temperature=0.2
         )
@@ -27,7 +27,7 @@ class RAG:
             """
 
         # URL для обращения к API векторной базы данных
-        self.api_url = "http://127.0.0.1:8000"
+        self.api_url = "http://127.0.0.1:8975"
 
     def search_db(self, query, k):
         # Выполнение POST-запроса к API для поиска
@@ -69,11 +69,11 @@ class RAG:
             "context_str": context_str,
             "query": query
         }
-        
 
         # Встраивание вопроса и контекста в промпт для LLM
         llm_sequence = prompt | self.yandex_gpt
-        return llm_sequence.invoke(inputs)
+        reponse = llm_sequence.invoke(inputs)
+        return reponse.strip()
 
 
 rag = RAG()

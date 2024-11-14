@@ -7,7 +7,7 @@ import requests
 def get_iam_token() -> str:
     # Чтение закрытого ключа из JSON-файла
     # JSON-файл с ключами создается в сервисном аккаунте (вкладка 'создать авторизованный ключ')
-    with open('kyes.json', 'r') as f:
+    with open('RAG/kyes.json', 'r') as f:
         obj = f.read()
         obj = json.loads(obj)
         private_key = obj['private_key']

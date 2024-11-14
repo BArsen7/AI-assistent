@@ -9,7 +9,7 @@ import re
 import tempfile
 import shutil
 
-# Инициализация приложения FastAPI
+# Инициализация FastAPI
 app = FastAPI()
 
 
@@ -30,21 +30,21 @@ hf_embedding = HuggingFaceEmbeddings(
 
 
 # Загрузка баз данных FAISS
-db_path_vk = "../faiss_db_vk"
-db_path_policy = "../faiss_db_policy"
+db_path_vk = "faiss_db_vk"
+db_path_policy = "faiss_db_policy"
 try:
     db_vk = FAISS.load_local(db_path_vk, hf_embedding, allow_dangerous_deserialization=True)
 except Exception:
     empty_document = Document(page_content=" ")
     db_vk = FAISS.from_documents([empty_document], hf_embedding)
-    db_vk.save_local(db_path_vk) # Сохранение пустой вбд, если ее еще нет
-    
+    db_vk.save_local(db_path_vk)  # Сохранение пустой вбд, если ее еще нет
+
 try:
     db_policy = FAISS.load_local(db_path_policy, hf_embedding, allow_dangerous_deserialization=True)
 except Exception:
     empty_document = Document(page_content=" ")
     db_policy = FAISS.from_documents([empty_document], hf_embedding)
-    db_policy.save_local(db_path_policy) # Сохранение пустой вбд, если ее еще нет
+    db_policy.save_local(db_path_policy)  # Сохранение пустой вбд, если ее еще нет
 
 # Конфигурация для разбиения текста на части
 text_splitter = CharacterTextSplitter(separator="\n", chunk_size=1000, chunk_overlap=128)
@@ -55,11 +55,11 @@ text_splitter = CharacterTextSplitter(separator="\n", chunk_size=1000, chunk_ove
 async def search(query: Query):
     results_vk = db_vk.similarity_search(query.text, query.number_doc_to_return)
     results_policy = db_policy.similarity_search(query.text, query.number_doc_to_return)
-    
+
     db_temp = FAISS.from_documents(results_vk + results_policy, hf_embedding)
     results_db_temp = db_temp.similarity_search(query.text, query.number_doc_to_return)
     del (db_temp)
-    
+
     context_str = "\n\n".join([n.page_content for n in results_db_temp])
     if context_str[0] == " ":
         raise HTTPException(status_code=404, detail="Vector database empty")
@@ -115,4 +115,4 @@ async def add_document(file: UploadFile = File(...)):
         return HTTPException(status_code=409, detail="Document already exists in the db_policy")
     else:
         db_policy.save_local(db_path_policy)  # Сохраняем изменения в вбд
-        return HTTPException(status_code=200, detail="Document added to db_policy successfully") 
+        return HTTPException(status_code=200, detail="Document added to db_policy successfully")
