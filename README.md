@@ -4,8 +4,9 @@ AI assistent for MEPHI students
 ## Файлы
 1. Папка data - папка для подготовленных данных для модели
 1.1. import_db.py - Скрипт для поиска информации в ВБД  
-1.2. faiss_db_base - ВБД на основе постов из групп: osomephi, mephi_official  
-1.3. faiss_db_large - ВБД на основе постов из групп: osomephi, mephi_official, vmephi, reactorclub, snomephi  
+1.2. faiss_db_vk - ВБД на основе постов из групп: osomephi, mephi_official  
+1.3. faiss_db_vk_large - ВБД на основе постов из групп: osomephi, mephi_official, vmephi, reactorclub, snomephi  
+1.4. faiss_db_policy - ВБД на основе методички
 2. Папка parse - папка с парсером и неподготовленными данными  
 2.1. testApi.py - тестовый скрипт для работы с API ВК
 2.2. parse-vk.py - скрипт для парсинга постов сообщества ВК  
@@ -21,6 +22,8 @@ AI assistent for MEPHI students
 3.1  RAG_with_api.py - API на FastAPI для взаимодействия с RAG
 3.2  create_iam_token.py - скрипт для автоматического получения iam_token'a
 3.3  keys.json - файл с авторизованными ключами, которые необходимы для получения iam_token'a
+
+Ссылка на векторные базы данных : https://disk.yandex.ru/d/2-F--Aw44QbGjg
 
 ## Получение токена пользователя
 1. Создать приложение по ссылке https://vk.com/editapp?act=create

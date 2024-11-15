@@ -2,17 +2,19 @@ import pandas as pd
 import re
 
 
-data = pd.read_csv('vmephi.csv') #mephi_official
-rewrite = False # False - дозапись в файл, True - перезапись файла
-
+data = pd.read_csv('mephi_official.csv')
+rewrite = True # False - дозапись в файл, True - перезапись файла
+del_link = False # False - оставляем ссылки в тексте постов, True - удаляем ссылки из постов
 data.drop_duplicates(subset='text', keep='first', inplace=True, ignore_index=True)
-
 array = []
 
 for index, row in data.iterrows():
     #print(row['i'], row['time'], row['id'], row['text'])
     if row['text']!=row['text']: continue # пропускаем записи без текста
-    y = ' '.join(re.sub("(@[А-Яа-яA-Za-z0-9Ё]+)|([^0-9A-Za-zА-Яа-яё \t])|(\w+:\/\/\S+)"," ",row['text']).split())
+    if del_link:
+        y = ' '.join(re.sub("(@[А-Яа-яA-Za-z0-9]+)|([^0-9A-Za-zА-Яа-я \t])|(\w+:\/\/\S+)"," ",row['text']).split())
+    else:
+        y = ' '.join(re.sub(r"(@[А-Яа-яA-Za-z0-9]+)|([^0-9A-Za-zА-Яа-я \t:/.\-_?&=%])", " ", row['text']).split())
     array.append([row['i'], row['time'],row['id'], [y]])
 
 
