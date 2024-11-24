@@ -2,8 +2,8 @@ import pandas as pd
 import re
 
 
-data = pd.read_csv('mephi_official.csv')
-rewrite = True # False - дозапись в файл, True - перезапись файла
+data = pd.read_csv('parse-data.csv')
+rewrite = False # False - дозапись в файл, True - перезапись файла
 del_link = False # False - оставляем ссылки в тексте постов, True - удаляем ссылки из постов
 data.drop_duplicates(subset='text', keep='first', inplace=True, ignore_index=True)
 array = []

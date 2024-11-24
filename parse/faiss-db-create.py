@@ -8,7 +8,7 @@ import re
 
 print('инициализация')
 # Инициализация HuggingFaceEmbeddings
-model_name = "intfloat/multilingual-e5-large-instruct" #"hkunlp/instructor-large"
+model_name = "hkunlp/instructor-large" # "intfloat/multilingual-e5-large-instruct" #"hkunlp/instructor-large"
 model_kwargs = {'device': 'cuda'}
 encode_kwargs = {'normalize_embeddings': True}
 hf_embedding = HuggingFaceEmbeddings(

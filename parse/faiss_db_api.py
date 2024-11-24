@@ -30,8 +30,8 @@ hf_embedding = HuggingFaceEmbeddings(
 
 
 # Загрузка баз данных FAISS
-db_path_vk = "faiss_db_vk"
-db_path_policy = "faiss_db_policy"
+db_path_vk = "data/faiss_db_vk" #"data/faiss_db_vk_large" 
+db_path_policy = "data/faiss_db_policy"
 try:
     db_vk = FAISS.load_local(db_path_vk, hf_embedding, allow_dangerous_deserialization=True)
 except Exception:

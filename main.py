@@ -1,5 +1,6 @@
 import asyncio
 
+bot = True
 
 async def start_faiss_db():
     # Запуск ВБД на порту 8975
@@ -16,9 +17,15 @@ async def start_RAG():
     )
     await process_rag.wait()
 
+async def start_bot():
+    # Запуск телеграм бота
+    if bot:
+        process_db = await asyncio.create_subprocess_exec("python", "bot.py")
+    
+
 
 async def main():
     # Параллельный запуск обоих процессов
-    await asyncio.gather(start_faiss_db(), start_RAG())
+    await asyncio.gather(start_faiss_db(), start_RAG(), start_bot())
 
 asyncio.run(main())
