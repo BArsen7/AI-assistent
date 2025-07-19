@@ -25,7 +25,7 @@ async def start_bot():
 
 
 async def main():
-    # Параллельный запуск обоих процессов
+    # Параллельный запуск процессов
     await asyncio.gather(start_faiss_db(), start_RAG(), start_bot())
 
 asyncio.run(main())

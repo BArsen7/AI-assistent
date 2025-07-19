@@ -63,6 +63,6 @@ db = FAISS.from_documents(data, hf_embedding)
 print('...')
 db.as_retriever()
 print("Векторная база данных faiss_db_policy создана")
-# Сохранение индексаированных данных локально
+# Сохранение индексированных данных локально
 db.save_local("faiss_db_policy")
 print("Векторная база данных faiss_db_policy сохранена")
