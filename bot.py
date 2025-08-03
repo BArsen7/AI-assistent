@@ -1,15 +1,18 @@
 import asyncio
 #import logging
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Bot, Dispatcher, types
 from aiogram.filters.command import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import requests
-import random
 
 # Функции для работы с базой данных операторов
-from userdb import init_auth_user_db, is_authorized, authorize_user, deauthorize_user, get_all_authorized_users, logpasscheck
+from authdb import init_auth_db, is_authorized, authorize_user, deauthorize_user, get_all_authorized_users, logpasscheck
+
+# Функции для работы с базой данных лога диалогов
+from operchatlogdb import init_chatlog_db, add_message, get_inbox, detach_operator, get_history, SEPARATOR
 
 # Finite State Machine (для работы с состояниями юзера)
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -19,10 +22,15 @@ from aiogram.fsm.storage.base import StorageKey
 # Двунаправленный словарь operator_id <-> user_id (чтобы знать куда сообщения пересылать)
 active_chats = {}
 
-# Класс состояний пользователя
+# Класс состояний любого пользователя
 class UserStates(StatesGroup):
     waiting_for_question = State()
+    waiting_for_answer = State()
     active_dialog = State()
+
+# Класс состояний оператора
+class OperatorStates(StatesGroup):
+    picking_inbox = State()
 
 with open("telegram_token.txt") as f:
     token = f.readline() 
@@ -39,24 +47,31 @@ async def cmd_start(message: types.Message, state: FSMContext):
     user_state = await state.get_state()
 
     # Кнопку показываем только если пользователь вне диалога
-    if user_state not in [UserStates.waiting_for_question.state, UserStates.active_dialog.state]:
+    if user_state is None:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="Написать оператору", callback_data="ask_operator")]
             ])
-        await message.answer("Привет! Я бот с искусственным интеллектом. Меня создали, чтобы помогать студентам НИЯУ МИФИ. Напиши мне свой вопрос — и я постараюсь тебе помочь. Также можешь написать оператору, воспользовавшись кнопкой ниже.",
+        await message.answer("Привет! Я бот с искусственным интеллектом. Меня создали, чтобы помогать студентам НИЯУ МИФИ. Напиши мне свой вопрос — и я постараюсь тебе помочь. Также можешь написать оператору, воспользовавшись кнопкой ниже. Для вывода списка команд введи /help.",
             reply_markup=keyboard)
-    else:
+    elif user_state == UserStates.waiting_for_answer.state:
+        await message.answer("Пока ожидаешь ответ оператора, можешь продолжать переписываться со мной! Буду рад попытаться ответить на твои вопросы.")
+    elif user_state in [UserStates.active_dialog.state, UserStates.waiting_for_question.state, UserStates.waiting_for_answer.state]:
         await message.answer("Вы начали или собираетесь начать диалог с оператором. Если хотите отменить — нажмите кнопку отмены или используйте /end.")
+    else:
+        await message.answer("Заготовка для других состояний.")
 
 
-# Обработка нажатия на кнопку "Написать оператору"
+# --- ДИАЛОГ С ОПЕРАТОРОМ ---
+
+
+# Хэндлер кнопки "Написать оператору"
 @dp.callback_query(lambda c: c.data == "ask_operator")
 async def handle_operator_request(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup(reply_markup=None)
 
     user_state = await state.get_state()
     
-    if user_state == UserStates.active_dialog.state:
+    if user_state in [UserStates.active_dialog.state, UserStates.waiting_for_question.state, UserStates.waiting_for_answer.state]:
         await callback.answer("Вы уже начали диалог. Завершите текущий, прежде чем писать заново.", show_alert=True)
         return
 
@@ -69,7 +84,7 @@ async def handle_operator_request(callback: types.CallbackQuery, state: FSMConte
     await callback.answer()
 
 
-# Обработка нажатия на кнопку отмены начала диалога с оператором
+# Хэндлер кнопки отмены начала диалога с оператором (или завершения диалога через неё)
 @dp.callback_query(lambda c: c.data == "cancel_before_dialog")
 async def cancel_before_dialog(callback: types.CallbackQuery, state: FSMContext):
     user_state = await state.get_state()
@@ -94,21 +109,116 @@ async def receive_question(message: types.Message, state: FSMContext):
         await message.answer("Сейчас нет доступных операторов :/")
         await state.clear()
         return
-
-    chosen_operator = random.choice(operators)
-    operator_id = chosen_operator[0]
+    
     user_id = message.from_user.id
+    username = message.from_user.username or "без имени"
+    msg_text = message.text
+
+    add_message(user_id, new_message = msg_text + " ——— from id: " + str(user_id))
+
+    for op_id, in operators: # рассылаем всем операторам уведомление
+        try:
+            await bot.send_message(
+                op_id,
+                f"Новое сообщение от пользователя @{username} (id: {user_id}):\n\n{msg_text}\n\nДля ответа введите команду /inbox и выберите данного пользователя."
+            )
+        except Exception as e:
+            print(f"Не удалось отправить сообщение оператору {op_id}: {e}")
+
+    await message.answer("Ваше сообщение отправлено операторам. Ожидайте ответа.")
+    await state.clear()
+    await state.set_state(UserStates.waiting_for_answer)
+
+
+# Команда /inbox для просмотра операторами входящих сообщений и последующего ответа на них
+@dp.message(Command("inbox"))
+async def cmd_inbox(message: types.Message, state: FSMContext):
+    if not is_authorized(message.from_user.id):
+        await message.answer("Вы не авторизованы, команда недоступна.")
+        return
+
+    inbox = get_inbox()
+    if not inbox:
+        await message.answer("Нет новых сообщений от пользователей.")
+        return
+
+    await state.set_state(OperatorStates.picking_inbox)
+    await state.update_data(inbox=inbox)
+
+    text = "Список входящих сообщений:\n"
+    for idx, (user_id, history) in enumerate(inbox, start=1):
+        # Пытаемся вытащить имя пользователя, если не выходит, оставляем айдишник
+        try:
+            user = await bot.get_chat(user_id)
+            name = f"@{user.username}" if user.username else f"{user.first_name or 'Пользователь'}"
+        except Exception:
+            name = f"id:{user_id}"
+    
+        separator = SEPARATOR
+        parts = history.split(separator)
+        last_message = parts[-1].strip() if parts else "Нет сообщений"
+        preview = last_message.replace('\n', ' ')
+        text += f"{idx}) {name}: {preview}\n"
+
+    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Отмена", callback_data="cancel_dialog_pick")]
+        ])
+
+    text += "\nНапиши номер диалога для начала общения:"
+    await message.answer(text, reply_markup=cancel_kb)
+
+
+# Хэндлер кнопки отмены выбора диалога (выхода из inbox) (или завершения диалога через неё)
+@dp.callback_query(lambda c: c.data == "cancel_dialog_pick")
+async def cancel_dialog_pick(callback: types.CallbackQuery, state: FSMContext):
+    user_state = await state.get_state()
+    
+    if user_state == OperatorStates.picking_inbox.state:
+        await callback.message.edit_text("Выбор диалога отменён.")
+        await state.clear()
+        await callback.answer()
+    elif user_state == UserStates.active_dialog.state:
+        await end_dialog(callback.from_user.id)  # message не передаём
+        await callback.message.answer("Диалог завершён.")
+        await callback.answer()
+    else:
+        await callback.answer("Вам нечего отменять :]", show_alert=True)
+
+
+# Начало диалога после выбора сообщения для ответа из inbox'а
+@dp.message(OperatorStates.picking_inbox)
+async def handle_inbox_choice(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    inbox = data.get("inbox", [])
+
+    try:
+        choice = int(message.text.strip())
+        if not (1 <= choice <= len(inbox)):
+            raise ValueError
+    except ValueError:
+        await message.answer("Неверный номер. Попробуй ещё раз.")
+        return
+
+    user_id, _ = inbox[choice - 1]
+    operator_id = message.from_user.id
+
+    # Просто вызываем add_message с пустым сообщением, он сам привяжет оператора
+    add_message(user_id, operator_id)
+
+    await state.clear()
+    await state.set_state(UserStates.active_dialog)
+
+    partner_context = FSMContext(
+        storage=dp.storage,
+        key=StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id),
+    )
+    await partner_context.set_state(UserStates.active_dialog)
 
     active_chats[operator_id] = user_id
     active_chats[user_id] = operator_id
 
-    await state.set_state(UserStates.active_dialog)
-
-    operator_context = FSMContext(storage=dp.storage, key=StorageKey(chat_id=operator_id, user_id=operator_id, bot_id=bot.id))
-    await operator_context.set_state(UserStates.active_dialog)
-
-    await bot.send_message(operator_id, f"Новый диалог с пользователем @{message.from_user.username or 'без имени'} (для завершения диалога введите /end):\n\n{message.text}")
-    await message.answer("Вы соединены с оператором. Пишите сообщения, чтобы продолжить. Введите /end для завершения.")
+    await message.answer(f"Вы подключились к диалогу с пользователем {user_id}. Можете начинать переписку. Для завершения диалога введите /end.")
+    await bot.send_message(user_id, "Оператор подключился к вашему диалогу. Для завершения диалога введите /end.")
 
 
 # Пересылка сообщений в активном диалоге
@@ -118,7 +228,15 @@ async def route_message(message: types.Message):
 
     if dude_id in active_chats:
         partner_id = active_chats[dude_id]
-        sender = "Оператор" if is_authorized(dude_id) else "Пользователь"
+
+        if is_authorized(dude_id):
+            sender = "Оператор"
+            add_message(partner_id, dude_id, message.text + " ——— from id: " + str(dude_id))
+        else:
+            sender = "Пользователь"
+            add_message(dude_id, partner_id, message.text + " ——— from id: " + str(dude_id))
+
+
         await bot.send_message(partner_id, f"{sender}:\n{message.text}")
     else:
         await message.answer("Ошибка: вы по какой-то причине не находитесь в активном диалоге, но находитесь в состоянии active_dialog :/")
@@ -137,6 +255,11 @@ async def end_dialog(dude_id: int, message: types.Message = None):
     if partner_id in active_chats:
         del active_chats[partner_id]
 
+    if is_authorized(dude_id):
+        detach_operator(partner_id)
+    else:
+        detach_operator(dude_id)
+
     dude_context = FSMContext(storage=dp.storage, key=StorageKey(chat_id=dude_id, user_id=dude_id, bot_id=bot.id))
     partner_context = FSMContext(storage=dp.storage, key=StorageKey(chat_id=partner_id, user_id=partner_id, bot_id=bot.id))
 
@@ -148,15 +271,42 @@ async def end_dialog(dude_id: int, message: types.Message = None):
         await message.answer("Диалог завершён.")
 
 
-# Команда завершения активного диалога
+# Команда /end завершения активного диалога
 @dp.message(Command("end"), UserStates.active_dialog)
-async def handle_end(message: types.Message):
+async def cmd_end(message: types.Message):
     await end_dialog(message.from_user.id, message)
+
+
+# Команда /history получения истории диалога с оператором/пользователем
+@dp.message(Command("history"))
+async def cmd_history(message: types.Message):
+    records = get_history(message.from_user.id)
+
+    if not records:
+        await message.answer("История пуста.")
+        return
+
+    text_chunks = []
+    for i, (other_id, history) in enumerate(records, start=1):
+        # Показываем только первые 1000 символов истории, если она большая
+        history_preview = history[-1000:] if len(history) > 1000 else history
+
+        text_chunks.append(f"Диалог #{i} с ID {other_id}:\n{history_preview}\n")
+
+    # Делим на части, если слишком длинно
+    max_len = 4000
+    for chunk in text_chunks:
+        for i in range(0, len(chunk), max_len):
+            await message.answer(chunk[i:i+max_len])
+
+
+# --- АУТЕНТИФИКАЦИЯ ---
 
 
 # Хэндлер команды /auth (вход в операторскую панель)
 @dp.message(Command("auth"))
 async def cmd_auth(message: types.Message):
+    # (!) Возможно в будущем следовало бы проверять ещё и вошёл ли кто с текущим аккаунтом, а не только айдишником
     if is_authorized(message.from_user.id):
         await message.answer("Вы уже авторизованы. Для входа в другой аккаунт введите команду /logout и попробуйте снова.")
         return
@@ -188,8 +338,11 @@ async def cmd_logout(message: types.Message):
         await message.answer("Вы не авторизованы :/")
 
 
-#Обработка сообщений
-@dp.message()
+# --- ДРУГОЕ ---
+
+
+# Обработка сообщений
+@dp.message(StateFilter(None, UserStates.waiting_for_answer))
 async def cmd(message: types.Message):
 
     url = "http://127.0.0.1:8965/generate_answer?hellow"
@@ -198,9 +351,26 @@ async def cmd(message: types.Message):
     await message.answer(response.text[11:-2])
 
 
+# Хэндлер команды /help
+@dp.message(Command("help"))
+async def cmd_help(message: types.Message):
+    user_id = message.from_user.id
+
+    ans = "/help — список доступных команд\n"
+    ans += "/start — начало (вызов кнопки \"Написать оператору\")\n"
+    if is_authorized(user_id):
+        ans += "/inbox — список входящих сообщений\n"
+        ans += "/history — просмотр истории всех диалогов с вашим участием\n"
+        ans += "/logout — выход из аккаунта"
+    else:
+        ans += "/history — просмотр истории диалогов с оператором\n"
+        ans += "/auth <login> <password> — вход в аккаунт оператора"
+
+
 # Запуск процесса поллинга новых апдейтов
 async def main():
-    init_auth_user_db()
+    init_auth_db()
+    init_chatlog_db()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

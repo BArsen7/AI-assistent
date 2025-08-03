@@ -4,7 +4,7 @@ import pandas as pd
 DB_PATH = "operators.db"
 CSV_PATH = "logins.csv"
 
-def init_auth_user_db():
+def init_auth_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
@@ -17,7 +17,7 @@ def init_auth_user_db():
     conn.commit()
     conn.close()
 
-def authorize_user(user_id: int):
+def authorize_user(user_id):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
@@ -35,7 +35,7 @@ def deauthorize_user(user_id):
     conn.commit()
     conn.close()
 
-def is_authorized(user_id: int):
+def is_authorized(user_id):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
@@ -55,7 +55,7 @@ def get_all_authorized_users():
     conn.close()
     return users
 
-def logpasscheck(login: str, password: str):
+def logpasscheck(login, password):
     try:
         df = pd.read_csv(CSV_PATH)
         row = df[(df['login'] == login) & (df['password'] == password)]
