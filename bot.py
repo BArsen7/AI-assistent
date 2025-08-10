@@ -18,6 +18,9 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.base import StorageKey
 
+# Для опроса
+import csv
+import os
 
 # Двунаправленный словарь operator_id <-> user_id (чтобы знать куда сообщения пересылать)
 active_chats = {}
@@ -27,6 +30,7 @@ class UserStates(StatesGroup):
     waiting_for_question = State()
     waiting_for_answer = State()
     active_dialog = State()
+    survey = State()
 
 # Класс состояний оператора
 class OperatorStates(StatesGroup):
@@ -49,14 +53,19 @@ async def cmd_start(message: types.Message, state: FSMContext):
     # Кнопку показываем только если пользователь вне диалога
     if user_state is None:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Написать оператору", callback_data="ask_operator")]
-            ])
+            [
+                InlineKeyboardButton(text="Написать оператору", callback_data="ask_operator"),
+                InlineKeyboardButton(text="Пройти опрос", callback_data="start_survey")
+            ]
+        ])
         await message.answer("Привет! Я бот с искусственным интеллектом. Меня создали, чтобы помогать студентам НИЯУ МИФИ. Напиши мне свой вопрос — и я постараюсь тебе помочь. Также можешь написать оператору, воспользовавшись кнопкой ниже. Для вывода списка команд введи /help.",
             reply_markup=keyboard)
     elif user_state == UserStates.waiting_for_answer.state:
         await message.answer("Пока ожидаешь ответ оператора, можешь продолжать переписываться со мной! Буду рад попытаться ответить на твои вопросы.")
-    elif user_state in [UserStates.active_dialog.state, UserStates.waiting_for_question.state, UserStates.waiting_for_answer.state]:
+    elif user_state in [UserStates.active_dialog.state, UserStates.waiting_for_question.state]:
         await message.answer("Вы начали или собираетесь начать диалог с оператором. Если хотите отменить — нажмите кнопку отмены или используйте /end.")
+    elif user_state == UserStates.survey.state:
+        await message.answer("Для начала пройди опрос!")
     else:
         await message.answer("Заготовка для других состояний.")
 
@@ -92,13 +101,13 @@ async def cancel_before_dialog(callback: types.CallbackQuery, state: FSMContext)
     if user_state == UserStates.waiting_for_question.state:
         await state.clear()
         await callback.message.edit_text("Диалог отменён. Если передумаете — нажмите «Написать оператору» снова. Для появления кнопки введите команду /start.")
-        await callback.answer()
     elif user_state == UserStates.active_dialog.state:
         await end_dialog(callback.from_user.id)  # message не передаём
         await callback.message.answer("Диалог завершён.")
-        await callback.answer()
     else:
         await callback.answer("Вам нечего отменять :]", show_alert=True)
+    
+    await callback.answer()
 
 
 # Обработка первого сообщения от пользователя оператору (начала диалога с оператором)
@@ -161,7 +170,7 @@ async def cmd_inbox(message: types.Message, state: FSMContext):
         text += f"{idx}) {name}: {preview}\n"
 
     cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Отмена", callback_data="cancel_dialog_pick")]
+        [InlineKeyboardButton(text="Отменить", callback_data="cancel_dialog_pick")]
         ])
 
     text += "\nНапиши номер диалога для начала общения:"
@@ -338,7 +347,113 @@ async def cmd_logout(message: types.Message):
         await message.answer("Вы не авторизованы :/")
 
 
+# --- ОПРОС ---
+
+
+# Список вопросов
+questions = [
+    "1️. В каких олимпиадах, конкурсах или проектах ты принимал(а) участие за последние 2-3 года? Какие из них запомнились больше всего и почему?",
+    "2️. Какие школьные предметы или направления науки/техники тебе нравились больше всего? Что именно в них было интересным?",
+    "3️. Делал(а) ли ты какие-либо личные или учебные проекты (технические, исследовательские, творческие)? Если да, расскажи кратко о самом интересном.",
+    "4️. Что повлияло на твой выбор направления обучения в МИФИ?",
+    "5️. Участвовал(а) ли ты в школьном самоуправлении, волонтерских проектах или других общественных активностях? Если да, расскажи о своем опыте.",
+    "6️. Увлекаешься ли ты каким-либо видом спорта или активного отдыха?",
+    "7. Есть ли у тебя творческие увлечения или хобби? Расскажи о них немного.",
+    "8. Есть ли какая-то область знаний или сфера деятельности, которая тебя особенно привлекает и в которой ты хотел(а) бы развиваться глубоко?",
+    "9. Хочешь ли ты что-то добавить о своих интересах, планах или ожиданиях?"
+]
+
+CSV_SURV = "survey_results.csv"
+
+surv_prog = {}
+
+# Создаём CSV файл, если его нет
+if not os.path.exists(CSV_SURV):
+    with open(CSV_SURV, mode="w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["user_id"] + [f"Вопрос {i+1}" for i in range(len(questions))])
+
+
+# Хэндлер кнопки "Пройти опрос"
+@dp.callback_query(lambda c: c.data == "start_survey")
+async def handle_start_survey(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup(reply_markup=None)
+
+    await state.set_state(UserStates.survey)
+    surv_prog[callback.from_user.id] = {"step": 0, "answers": []}
+
+    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Отмена", callback_data="cancel_survey")]
+        ])
+    
+    await callback.message.answer(f"Опрос состоит из {len(questions)} вопросов. После ответа на последний вопрос все данные автоматически сохранятся.\n\n{questions[0]}",
+                                   reply_markup=cancel_kb)
+    await callback.answer()
+    # возможна реализация опционально-анонимного опроса
+
+
+# Хэндлер кнопки отмены прохождения опроса
+@dp.callback_query(lambda c: c.data == "cancel_survey")
+async def cancel_survey(callback: types.CallbackQuery, state: FSMContext):
+    user_state = await state.get_state()
+
+    if user_state != UserStates.survey.state:
+        await callback.answer("Вы не проходите опрос", show_alert=True)
+    else:
+        surv_prog.pop(callback.from_user.id, None)
+        await state.clear()
+        await callback.message.answer("Опрос отменён.")
+    await callback.answer()
+
+
+# Прохождение опроса и обработка результатов
+@dp.message(UserStates.survey)
+async def survey(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+
+    if user_id not in surv_prog:
+        await message.answer("Ошибка: вы не начали опрос. Нажмите кнопку 'Пройти опрос'.")
+        await state.clear()
+        return
+    
+    prog = surv_prog[user_id]
+    prog["answers"].append(message.text)
+    prog["step"] += 1
+
+    if prog["step"] >= len(questions): # заканчиваем опрос
+        with open(CSV_SURV, mode="a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([user_id] + prog["answers"])
+
+        await message.answer("Спасибо! Опрос завершён, ответы сохранены.")
+        surv_prog.pop(user_id, None)
+        await state.clear()
+    else: # следующий вопрос
+        cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Отмена", callback_data="cancel_survey")]
+        ])
+        await message.answer(questions[prog["step"]], reply_markup=cancel_kb)
+
+
 # --- ДРУГОЕ ---
+
+
+# Хэндлер команды /help
+# (!) Возможно в будущем доделать поведение для разных стейтов пользователей
+@dp.message(Command("help"))
+async def cmd_help(message: types.Message):
+    user_id = message.from_user.id
+
+    ans = "/help — список доступных команд\n"
+    ans += "/start — начало (вызов кнопок \"Написать оператору\" и \"Пройти опрос\")\n"
+    if is_authorized(user_id):
+        ans += "/inbox — список входящих сообщений\n"
+        ans += "/history — просмотр истории всех диалогов с вашим участием\n"
+        ans += "/logout — выход из аккаунта"
+    else:
+        ans += "/history — просмотр истории диалогов с оператором\n"
+        ans += "/auth <login> <password> — вход в аккаунт оператора"
+    await message.answer(ans)
 
 
 # Обработка сообщений
@@ -349,22 +464,6 @@ async def cmd(message: types.Message):
     response = requests.post(url, json={"question": message.text})
 
     await message.answer(response.text[11:-2])
-
-
-# Хэндлер команды /help
-@dp.message(Command("help"))
-async def cmd_help(message: types.Message):
-    user_id = message.from_user.id
-
-    ans = "/help — список доступных команд\n"
-    ans += "/start — начало (вызов кнопки \"Написать оператору\")\n"
-    if is_authorized(user_id):
-        ans += "/inbox — список входящих сообщений\n"
-        ans += "/history — просмотр истории всех диалогов с вашим участием\n"
-        ans += "/logout — выход из аккаунта"
-    else:
-        ans += "/history — просмотр истории диалогов с оператором\n"
-        ans += "/auth <login> <password> — вход в аккаунт оператора"
 
 
 # Запуск процесса поллинга новых апдейтов
