@@ -2,6 +2,7 @@ import sqlite3
 import pandas as pd
 
 DB_PATH = "operators.db"
+UDB_PATH = "users.db"
 CSV_PATH = "logins.csv"
 
 def init_auth_db():
@@ -16,6 +17,21 @@ def init_auth_db():
 
     conn.commit()
     conn.close()
+    
+    connection = sqlite3.connect(UDB_PATH)
+    cursor = connection.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS Users (
+        id INTEGER PRIMARY KEY,
+        FIO TEXT NOT NULL,
+        user_group TEXT NOT NULL,           
+        username TEXT NOT NULL,
+        first_name TEXT,
+        last_name TEXT
+        )
+        ''')
+    connection.commit()
+    connection.close()
 
 def authorize_user(user_id):
     conn = sqlite3.connect(DB_PATH)
@@ -63,3 +79,32 @@ def logpasscheck(login, password):
     except FileNotFoundError:
         print("logins.csv не найден")
         return False
+
+
+"""
+connection = sqlite3.connect('my_database.db')
+cursor = connection.cursor()
+
+# Обновляем возраст пользователя "newuser"
+cursor.execute('UPDATE Users SET age = ? WHERE username = ?', (29, 'newuser'))
+
+# Сохраняем изменения и закрываем соединение
+connection.commit()
+connection.close()
+
+"""
+def find_user(id):
+    connection = sqlite3.connect(UDB_PATH)
+    cursor = connection.cursor()
+    cursor.execute(f"SELECT EXISTS(SELECT 1 FROM Users WHERE id = ?)", (id,))
+    responce = cursor.fetchone()[0]
+    connection.close()
+    return responce
+
+def reg_user(data):
+    connection = sqlite3.connect(UDB_PATH)
+    cursor = connection.cursor()
+    cursor.execute("INSERT INTO Users (id, FIO, user_group, username, first_name, last_name) VALUES (?, ?, ?, ?, ?, ?)", data)
+    connection.commit()
+    connection.close()
+    

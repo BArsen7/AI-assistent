@@ -6,7 +6,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import requests
 
 # Функции для работы с базой данных операторов
-from authdb import init_auth_db, is_authorized, authorize_user, deauthorize_user, get_all_authorized_users, logpasscheck
+from authdb import init_auth_db, is_authorized, authorize_user, deauthorize_user, get_all_authorized_users, logpasscheck, find_user, reg_user
 
 # Функции для работы с базой данных лога диалогов
 from operchatlogdb import init_chatlog_db, add_message, get_inbox, detach_operator, get_history, SEPARATOR
@@ -27,6 +27,7 @@ active_chats = {}
 
 # Класс состояний любого пользователя
 class UserStates(StatesGroup):
+    authorize = State()
     waiting_for_question = State()
     waiting_for_answer = State()
     active_dialog = State()
@@ -44,6 +45,8 @@ bot = Bot(token)
 dp = Dispatcher(storage=MemoryStorage()) # FSM состояния пользователей храняться до перезапуска бота
 
 #------------------------------------------------------------------------------
+
+
 
 # Хэндлер на команду /start
 @dp.message(Command("start"))
@@ -66,6 +69,8 @@ async def cmd_start(message: types.Message, state: FSMContext):
         await message.answer("Вы начали или собираетесь начать диалог с оператором. Если хотите отменить — нажмите кнопку отмены или используйте /end.")
     elif user_state == UserStates.survey.state:
         await message.answer("Для начала пройди опрос!")
+    elif user_state == UserStates.authorize.state:
+        await message.answer("Вы заспустили форму авторизации")
     else:
         await message.answer("Заготовка для других состояний.")
 
@@ -77,20 +82,20 @@ async def cmd_start(message: types.Message, state: FSMContext):
 @dp.callback_query(lambda c: c.data == "ask_operator")
 async def handle_operator_request(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup(reply_markup=None)
+    if await user_auth(callback, state):
+        user_state = await state.get_state()
 
-    user_state = await state.get_state()
-    
-    if user_state in [UserStates.active_dialog.state, UserStates.waiting_for_question.state, UserStates.waiting_for_answer.state]:
-        await callback.answer("Вы уже начали диалог. Завершите текущий, прежде чем писать заново.", show_alert=True)
-        return
+        if user_state in [UserStates.active_dialog.state, UserStates.waiting_for_question.state, UserStates.waiting_for_answer.state]:
+            await callback.answer("Вы уже начали диалог. Завершите текущий, прежде чем писать заново.", show_alert=True)
+            return
 
-    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Отменить", callback_data="cancel_before_dialog")]
-        ])
-    
-    await state.set_state(UserStates.waiting_for_question)
-    await callback.message.answer("Напишите свой вопрос оператору:", reply_markup=cancel_kb)
-    await callback.answer()
+        cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Отменить", callback_data="cancel_before_dialog")]
+            ])
+
+        await state.set_state(UserStates.waiting_for_question)
+        await callback.message.answer("Напишите свой вопрос оператору:", reply_markup=cancel_kb)
+        await callback.answer()
 
 
 # Хэндлер кнопки отмены начала диалога с оператором (или завершения диалога через неё)
@@ -194,7 +199,7 @@ async def cancel_dialog_pick(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("Вам нечего отменять :]", show_alert=True)
 
 
-# Начало диалога после выбора сообщения для ответа из inbox'а
+# Начало диалога после выбора сообщения для ответа из inbox'аdict[message.from_user.id]
 @dp.message(OperatorStates.picking_inbox)
 async def handle_inbox_choice(message: types.Message, state: FSMContext):
     data = await state.get_data()
@@ -346,6 +351,32 @@ async def cmd_logout(message: types.Message):
     else:
         await message.answer("Вы не авторизованы :/")
 
+dict = {}
+# Авторизация пользователя
+async def user_auth(data, state):
+    if not find_user(data.from_user.id):
+        await state.set_state(UserStates.authorize)
+        dict[data.from_user.id] = [0]
+        await data.message.answer("Перед началом необходимо пройти процесс авторизации (2 шага). \n1. Введи ФИО")
+    else: return True
+    return False
+
+
+@dp.message(UserStates.authorize)
+async def survey(message: types.Message, state: FSMContext):
+    if dict[message.from_user.id][0] == 0:
+        dict[message.from_user.id][0]=1
+        dict[message.from_user.id].append(message.text)
+        await message.answer("2. Введите номер группы")
+    elif dict[message.from_user.id][0] == 1:
+        dict[message.from_user.id].append(message.text)
+        dict[message.from_user.id].append(message.from_user.username)
+        dict[message.from_user.id].append(message.from_user.first_name)
+        dict[message.from_user.id].append(message.from_user.last_name)
+        dict[message.from_user.id][0] = message.from_user.id
+        reg_user(dict[message.from_user.id])
+        await message.answer("Авторизация успешно пройдена, для прохождения опроса или связи с оператором отправьте команду /start")
+        await state.clear()
 
 # --- ОПРОС ---
 
@@ -378,18 +409,18 @@ if not os.path.exists(CSV_SURV):
 @dp.callback_query(lambda c: c.data == "start_survey")
 async def handle_start_survey(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup(reply_markup=None)
+    if await user_auth(callback, state):
+        await state.set_state(UserStates.survey)
+        surv_prog[callback.from_user.id] = {"step": 0, "answers": []}
 
-    await state.set_state(UserStates.survey)
-    surv_prog[callback.from_user.id] = {"step": 0, "answers": []}
+        cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Отмена", callback_data="cancel_survey")]
+            ])
 
-    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Отмена", callback_data="cancel_survey")]
-        ])
-    
-    await callback.message.answer(f"Опрос состоит из {len(questions)} вопросов. После ответа на последний вопрос все данные автоматически сохранятся.\n\n{questions[0]}",
-                                   reply_markup=cancel_kb)
-    await callback.answer()
-    # возможна реализация опционально-анонимного опроса
+        await callback.message.answer(f"Опрос состоит из {len(questions)} вопросов. После ответа на последний вопрос все данные автоматически сохранятся.\n\n{questions[0]}",
+                                       reply_markup=cancel_kb)
+        await callback.answer()
+        # возможна реализация опционально-анонимного опроса
 
 
 # Хэндлер кнопки отмены прохождения опроса
